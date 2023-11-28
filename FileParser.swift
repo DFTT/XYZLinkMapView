@@ -7,18 +7,57 @@
 
 import Cocoa
 
+protocol SizeAble {
+    var size: UInt { get }
+}
+
 struct LinkMap {
-    class ObjectFile {
-        struct Symbol {
+    class FramworkFile: SizeAble {
+        let name: String
+        var objFiles: [ObjectFile] = []
+
+        init(name: String) {
+            self.name = name
+        }
+
+        var size: UInt {
+            return objFiles.reduce(UInt(0)) { partialResult, sym in
+                partialResult + sym.size
+            }
+        }
+
+        var sizeFormat: String {
+            let aa = Float(size)
+            let M = Float(1024 * 1024)
+            let K = Float(1024)
+            if aa > M {
+                return String(format: "%.2f M", aa / M)
+            }
+            return String(format: "%.2f K", aa / K)
+        }
+    }
+
+    class ObjectFile: SizeAble {
+        struct Symbol: SizeAble {
             let adress: String
             let size: UInt
             let fileNum: String
             let text: String
+
+            var sizeFormat: String {
+                let aa = Float(size)
+                let M = Float(1024 * 1024)
+                let K = Float(1024)
+                if aa > M {
+                    return String(format: "%.2f M", aa / M)
+                }
+                return String(format: "%.2f K", aa / K)
+            }
         }
 
         // "[ xx ]"
         let orderNumber: String
-        // "xx".o / xxx("xx".o)
+        // "xx".o / aaa("xx".o)
         let name: String
         // "xxx"(xx.o)  只有是framework中.o才有
         let frameWorkName: String?
@@ -30,6 +69,16 @@ struct LinkMap {
             return symbols.reduce(UInt(0)) { partialResult, sym in
                 partialResult + sym.size
             }
+        }
+
+        var sizeFormat: String {
+            let aa = Float(size)
+            let M = Float(1024 * 1024)
+            let K = Float(1024)
+            if aa > M {
+                return String(format: "%.2f M", aa / M)
+            }
+            return String(format: "%.2f K", aa / K)
         }
 
         init(orderNumber: String, name: String, frameWorkName: String?) {
@@ -44,6 +93,37 @@ struct LinkMap {
 
     // # Object files:
     let objectFiles: [String: ObjectFile]
+
+    // FramworkFile ObjectFile 混合数组 size降序
+    func groupDatas() -> [SizeAble] {
+        guard objectFiles.isEmpty == false else { return [] }
+
+        var framewMap = [String: FramworkFile]()
+        let remainObjs: [ObjectFile] = objectFiles.values.filter { obj in
+            // 符号排序
+            obj.symbols.sort { $0.size > $1.size }
+            //
+            guard let fName = obj.frameWorkName else { return true }
+            if let framw = framewMap[fName] {
+                framw.objFiles.append(obj)
+            } else {
+                let f = FramworkFile(name: fName)
+                f.objFiles.append(obj)
+                framewMap[fName] = f
+            }
+            return false
+        }
+        //
+        let framews = framewMap.map { $0.value } as [FramworkFile]
+        framews.forEach { $0.objFiles.sort { $0.size > $1.size } }
+        //
+        var datas = [SizeAble]()
+        datas.append(contentsOf: remainObjs as [SizeAble])
+        datas.append(contentsOf: framews)
+        //
+        datas.sort { $0.size > $1.size }
+        return datas
+    }
 }
 
 enum FileParser {
@@ -116,7 +196,7 @@ extension FileParser {
         let compArr = lastComp.components(separatedBy: "(")
         if compArr.count == 2 {
             framework = compArr.first!
-            name = String(lastComp.dropLast(1))
+            name = String(compArr.last!.dropLast(1))
         } else {
             framework = nil
             name = lastComp
